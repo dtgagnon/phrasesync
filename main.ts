@@ -25,10 +25,10 @@ function fuzzyMatch(query: string, text: string): boolean {
     return true;
 }
 
-export default class SmartAutoLinkerPro extends Plugin {
+export default class PhraseSync extends Plugin {
     private index: Map<string, IndexEntry[]> = new Map();
-    private metadataCache: MetadataCache;
-    private vault: Vault;
+    private metadataCache!: MetadataCache;  // silasm01 added non-null assertion
+    private vault!: Vault;                  // silasm01 added non-null assertion
     private isIndexing = false;
     private debounceTimeout?: number;
 
@@ -87,7 +87,7 @@ export default class SmartAutoLinkerPro extends Plugin {
         }));
 
         // Register editor suggest
-        this.registerEditorSuggest(new SmartAutoLinkerProSuggest(this));
+        this.registerEditorSuggest(new PhraseSyncSuggest(this));
     }
 
     private async buildFullIndex() {
@@ -210,8 +210,8 @@ export default class SmartAutoLinkerPro extends Plugin {
     }
 }
 
-class SmartAutoLinkerProSuggest extends EditorSuggest<IndexEntry> {
-    constructor(private plugin: SmartAutoLinkerPro) {
+class PhraseSyncSuggest extends EditorSuggest<IndexEntry> {
+    constructor(private plugin: PhraseSync) {
         super(plugin.app);
     }
 
@@ -230,12 +230,67 @@ class SmartAutoLinkerProSuggest extends EditorSuggest<IndexEntry> {
             };
         }
 
-        // Standard word/phrase detection
+        // --- silasm01'S IMPROVEMENT: Sentence-based phrase detection ---
+        // Find sentence boundaries (., !, ?, or line start/end)
+        const sentenceEndRegex = /[.!?]/g;
+        let sentenceStart = 0;
+        let sentenceEnd = line.length;
+        for (let i = cursor.ch - 1; i >= 0; i--) {
+            if (/[.!?]/.test(line[i])) {
+                sentenceStart = i + 1;
+                break;
+            }
+        }
+        for (let i = cursor.ch; i < line.length; i++) {
+            if (/[.!?]/.test(line[i])) {
+                sentenceEnd = i;
+                break;
+            }
+        }
+        // Trim whitespace
+        while (sentenceStart < sentenceEnd && /\s/.test(line[sentenceStart])) sentenceStart++;
+        while (sentenceEnd > sentenceStart && /\s/.test(line[sentenceEnd - 1])) sentenceEnd--;
+        const sentence = line.substring(sentenceStart, sentenceEnd);
+        const sentenceOffset = sentenceStart;
+
+        // Split sentence into words with indices
+        const wordsWithIndices: { word: string, start: number, end: number }[] = [];
+        let wordRegex = /\b\w[\w\p{L}\p{N}'-]*\b/gu;
+        let match;
+        while ((match = wordRegex.exec(sentence)) !== null) {
+            wordsWithIndices.push({ word: match[0], start: match.index, end: match.index + match[0].length });
+        }
+        // Find which word the cursor is in (relative to sentence)
+        let cursorInSentence = cursor.ch - sentenceOffset;
+        let cursorWordIdx = wordsWithIndices.findIndex(w => cursorInSentence >= w.start && cursorInSentence <= w.end);
+        if (cursorWordIdx === -1) cursorWordIdx = wordsWithIndices.findIndex(w => cursorInSentence === w.end);
+        if (cursorWordIdx === -1) return null;
+
+        // Try all possible phrases in the sentence (longest to shortest)
+        for (let span = wordsWithIndices.length; span >= 1; span--) {
+            for (let offset = 0; offset <= wordsWithIndices.length - span; offset++) {
+                const startIdx = offset;
+                const endIdx = startIdx + span - 1;
+                const phraseStart = wordsWithIndices[startIdx].start;
+                const phraseEnd = wordsWithIndices[endIdx].end;
+                // Only consider phrases that include the cursor word
+                if (cursorWordIdx < startIdx || cursorWordIdx > endIdx) continue;
+                const phrase = sentence.substring(phraseStart, phraseEnd);
+                if (this.plugin.getSuggestions(phrase).length > 0) {
+                    return {
+                        start: { line: cursor.line, ch: sentenceOffset + phraseStart },
+                        end: { line: cursor.line, ch: sentenceOffset + phraseEnd },
+                        query: phrase,
+                    };
+                }
+            }
+        }
+
+        // Fallback to original word-based detection if no phrase matches
         let start = cursor.ch;
         while (start > 0 && !/[\s\p{P}]/u.test(line.charAt(start - 1))) start--;
         let end = cursor.ch;
         while (end < line.length && !/[\s\p{P}]/u.test(line.charAt(end))) end++;
-
         const query = line.substring(start, end);
         return query ? { start: { line: cursor.line, ch: start }, end: { line: cursor.line, ch: end }, query } : null;
     }
@@ -271,6 +326,9 @@ class SmartAutoLinkerProSuggest extends EditorSuggest<IndexEntry> {
     selectSuggestion(item: IndexEntry) {
         if (!this.context) return;
         const { editor, start, end, query } = this.context;
+
+        // silasm01'S ADDITION: Debug log for link insertion
+        console.log('Inserting link for:', JSON.stringify(item), ', at position:', JSON.stringify({ start, end }));
 
         let linkText = '';
         switch (item.type) {
