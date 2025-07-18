@@ -1,0 +1,17 @@
+# Build output
+main.js
+main.js.map
+
+# Dependencies
+node_modules/
+
+# Logs and OS metadata
+*.log
+.DS_Store
+Thumbs.db
+
+# Optional: editor-specific junk
+.vscode/
+.idea/
+.esbuild/
+dist/

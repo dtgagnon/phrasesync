@@ -327,9 +327,6 @@ class PhraseSyncSuggest extends EditorSuggest<IndexEntry> {
         if (!this.context) return;
         const { editor, start, end, query } = this.context;
 
-        // silasm01'S ADDITION: Debug log for link insertion
-        console.log('Inserting link for:', JSON.stringify(item), ', at position:', JSON.stringify({ start, end }));
-
         let linkText = '';
         switch (item.type) {
             case 'title': linkText = `[[${item.target}|${query}]]`; break;
