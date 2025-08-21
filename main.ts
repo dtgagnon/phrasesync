@@ -8,6 +8,8 @@ import {
     MarkdownView,
     MetadataCache,
     Plugin,
+    PluginSettingTab,
+    Setting,
     TAbstractFile,
     TFile,
     Vault,
@@ -26,6 +28,14 @@ type IndexEntry = {
     score?: number;
 };
 
+interface PhraseSyncSettings {
+    stopWords: string;
+}
+
+const DEFAULT_SETTINGS: PhraseSyncSettings = {
+    stopWords: 'a,an,the,and,but,or,so,for,in,on,at,to,with,by,from,of,i,you,he,she,it,we,they,me,him,her,us,them,is,are,was,were,be,been,being,have,has,had,do,does,did,will,would,should,can,could,not,no'
+};
+
 function fuzzyMatch(query: string, text: string): boolean {
     const queryChars = query.toLowerCase().split('');
     const textLower = text.toLowerCase();
@@ -41,6 +51,8 @@ function fuzzyMatch(query: string, text: string): boolean {
 
 export default class PhraseSync extends Plugin {
     private index: Map<string, IndexEntry[]> = new Map();
+    settings!: PhraseSyncSettings;
+    private stopWords: Set<string> = new Set();
     private metadataCache!: MetadataCache;
     private vault!: Vault;
     private isIndexing = false;
@@ -52,6 +64,8 @@ export default class PhraseSync extends Plugin {
         this.startupAttempts++;
 
         try {
+            await this.loadSettings();
+            this.buildStopWordsSet();
             await this.initializePlugin();
 
             if (this.index.size === 0 && this.startupAttempts < this.maxStartupAttempts) {
@@ -95,10 +109,28 @@ export default class PhraseSync extends Plugin {
         }));
 
         this.registerEditorSuggest(new PhraseSyncSuggest(this));
+        this.addSettingTab(new PhraseSyncSettingTab(this.app, this));
     }
 
     onunload() {
         // Cleanup if needed
+    }
+
+    async loadSettings() {
+        this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    }
+
+    async saveSettings() {
+        await this.saveData(this.settings);
+    }
+
+    private buildStopWordsSet() {
+        this.stopWords = new Set(
+            this.settings.stopWords
+                .split(',')
+                .map(s => this.normalizeText(s.trim()))
+                .filter(s => s.length > 0)
+        );
     }
 
     private normalizeText(text: string): string {
@@ -222,7 +254,7 @@ export default class PhraseSync extends Plugin {
 
     public getSuggestions(query: string): IndexEntry[] {
         const normalizedQuery = this.normalizeText(query);
-        if (!normalizedQuery) return [];
+        if (!normalizedQuery || this.stopWords.has(normalizedQuery)) return [];
 
         const exactMatches: IndexEntry[] = [];
         for (const [key, entries] of this.index.entries()) {
@@ -362,5 +394,34 @@ class PhraseSyncSuggest extends EditorSuggest<IndexEntry> {
 
         editor.replaceRange(linkText, start, end);
         this.close();
+    }
+}
+
+class PhraseSyncSettingTab extends PluginSettingTab {
+    plugin: PhraseSync;
+
+    constructor(app: App, plugin: PhraseSync) {
+        super(app, plugin);
+        this.plugin = plugin;
+    }
+
+    display(): void {
+        const { containerEl } = this;
+
+        containerEl.empty();
+
+        containerEl.createEl('h2', { text: 'PhraseSync Settings' });
+
+        new Setting(containerEl)
+            .setName('Stop Words')
+            .setDesc('A comma-separated list of words to ignore for linking. Changes take effect immediately.')
+            .addTextArea(text => text
+                .setPlaceholder('e.g., a,an,the,...')
+                .setValue(this.plugin.settings.stopWords)
+                .onChange(async (value) => {
+                    this.plugin.settings.stopWords = value;
+                    await this.plugin.saveSettings();
+                    this.plugin.buildStopWordsSet();
+                }));
     }
 }
