@@ -19,7 +19,6 @@
             nodePackages.pnpm
             esbuild
             typescript
-            nodePackages.tslib
           ];
           shellHook = ''
             # Ensure dev environment has needed environment variables
