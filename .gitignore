@@ -15,7 +15,3 @@ Thumbs.db
 .idea/
 .esbuild/
 dist/
-
-# Nix environment
-.direnv
-flake.lock

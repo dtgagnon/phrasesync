@@ -36,23 +36,10 @@ const DEFAULT_SETTINGS: PhraseSyncSettings = {
     stopWords: 'a,an,the,and,but,or,so,for,in,on,at,to,with,by,from,of,i,you,he,she,it,we,they,me,him,her,us,them,is,are,was,were,be,been,being,have,has,had,do,does,did,will,would,should,can,could,not,no'
 };
 
-function fuzzyMatch(query: string, text: string): boolean {
-    const queryChars = query.toLowerCase().split('');
-    const textLower = text.toLowerCase();
-    let searchIndex = 0;
-
-    for (const char of queryChars) {
-        const foundIndex = textLower.indexOf(char, searchIndex);
-        if (foundIndex === -1) return false;
-        searchIndex = foundIndex + 1;
-    }
-    return true;
-}
-
 export default class PhraseSync extends Plugin {
     private index: Map<string, IndexEntry[]> = new Map();
     settings!: PhraseSyncSettings;
-    private stopWords: Set<string> = new Set();
+    public stopWords: Set<string> = new Set();
     private metadataCache!: MetadataCache;
     private vault!: Vault;
     private isIndexing = false;
@@ -133,7 +120,7 @@ export default class PhraseSync extends Plugin {
         );
     }
 
-    private normalizeText(text: string): string {
+    public normalizeText(text: string): string {
         return text
             .normalize('NFD')
             .replace(/[̀-ͯ]/g, '')
@@ -256,22 +243,14 @@ export default class PhraseSync extends Plugin {
         const normalizedQuery = this.normalizeText(query);
         if (!normalizedQuery || this.stopWords.has(normalizedQuery)) return [];
 
-        const exactMatches: IndexEntry[] = [];
+        const matches: IndexEntry[] = [];
         for (const [key, entries] of this.index.entries()) {
-            if (key.startsWith(normalizedQuery)) {
-                exactMatches.push(...entries.map(e => ({ ...e, score: 0 })));
+            if (key.includes(normalizedQuery)) {
+                matches.push(...entries.map(e => ({ ...e, score: 0 })));
             }
         }
 
-        const fuzzyMatches: IndexEntry[] = [];
-        for (const [key, entries] of this.index.entries()) {
-            if (fuzzyMatch(normalizedQuery, key)) {
-                fuzzyMatches.push(...entries.map(e => ({ ...e, score: 0.5 })));
-            }
-        }
-
-        const allMatches = [...exactMatches, ...fuzzyMatches];
-        const uniqueMatches = allMatches.filter((match, index, self) =>
+        const uniqueMatches = matches.filter((match, index, self) =>
             index === self.findIndex(m => m.type === match.type && m.notePath === match.notePath && m.target === match.target)
         );
 
@@ -338,6 +317,11 @@ class PhraseSyncSuggest extends EditorSuggest<IndexEntry> {
                 const phraseEnd = wordsWithIndices[endIdx].end;
                 if (cursorWordIdx < startIdx || cursorWordIdx > endIdx) continue;
                 const phrase = sentence.substring(phraseStart, phraseEnd);
+
+                const phraseWords = phrase.split(/\s+/);
+                const allWordsAreStopWords = phraseWords.every(word => this.plugin.stopWords.has(this.plugin.normalizeText(word)));
+                if (allWordsAreStopWords) continue;
+
                 if (this.plugin.getSuggestions(phrase).length > 0) {
                     return {
                         start: { line: cursor.line, ch: sentenceOffset + phraseStart },

@@ -6,13 +6,11 @@
   "author": "Digvijay S. Todiwal",
   "license": "MIT",
   "scripts": {
-    "build": "node esbuild.config.mjs production",
+    "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
     "dev": "node esbuild.config.mjs development"
   },
   "devDependencies": {
-    "@types/node": "^24.3.0",
     "esbuild": "^0.19.0",
-    "tslib": "^2.8.1",
     "typescript": "^5.0.0"
   }
 }
